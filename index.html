@@ -11,7 +11,7 @@
         .game-card { display: flex; flex-direction: column; height: 100%; width: 100%; max-width: 500px; margin: 0 auto; background: white; position: relative; }
         .display-section { flex: 1; background: linear-gradient(#E3F2FD, #FFFFFF); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; min-height: 0; }
         .stats-badge { position: absolute; top: 15px; background: white; padding: 4px 12px; border-radius: 15px; font-size: 11px; border: 2px solid var(--brown); z-index: 5; }
-        .pudu-bubble { background: var(--bubble-bg); color: white; padding: 12px 18px; border-radius: 20px; margin-bottom: 20px; max-width: 80%; text-align: center; font-size: 16px; position: relative; box-shadow: 0 4px 0 rgba(0,0,0,0.2); word-wrap: break-word; max-height: 180px; overflow-y: auto; }
+        .pudu-bubble { background: var(--bubble-bg); color: white; padding: 12px 18px; border-radius: 20px; margin-bottom: 20px; max-width: 80%; text-align: center; font-size: 16px; position: relative; box-shadow: 0 4px 0 rgba(0,0,0,0.2); word-wrap: break-word; max-height: 200px; overflow-y: auto; }
         .pudu-bubble::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); border-top: 10px solid var(--bubble-bg); border-left: 10px solid transparent; border-right: 10px solid transparent; }
         #pudu-svg { width: 120px; height: 120px; }
         .bounce { animation: bounce 2s infinite; }
@@ -25,15 +25,109 @@
 </head>
 <body>
 
-<div class="game-card" id="main-app">
+<div class="game-card">
     <div class="display-section">
         <div class="stats-badge">🧠 Memori: <span id="mem-count">0</span></div>
         <div id="pudu-msg" class="pudu-bubble">Menghubungkan satelit... ✨</div>
         <svg id="pudu-svg" class="bounce" viewBox="0 0 100 100">
-            <ellipse cx="35" cy="30" rx="8" ry="20" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/><ellipse cx="65" cy="30" rx="8" ry="20" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/><circle cx="50" cy="65" r="30" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/><circle cx="40" cy="60" r="3.5" fill="#42210B"/><circle cx="60" cy="60" r="3.5" fill="#42210B"/><path d="M 45 72 Q 50 76 55 72" fill="none" stroke="#42210B" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="50" cy="65" r="30" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/>
+            <circle cx="40" cy="60" r="3.5" fill="#42210B"/>
+            <circle cx="60" cy="60" r="3.5" fill="#42210B"/>
+            <path d="M 45 72 Q 50 76 55 72" fill="none" stroke="#42210B" stroke-width="2" stroke-linecap="round"/>
         </svg>
     </div>
     <div class="chat-section">
+        <div id="ui-container" class="input-wrapper loading-ui">
+            <input type="text" id="user-input" placeholder="Tanya apa saja..." autocomplete="off">
+            <button id="send-btn">Kirim</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const SHEET_API = "https://sheetdb.io/api/v1/n5l2vbztj42bs"; 
+    let globalMemory = [];
+    let userName = localStorage.getItem("puffie_user_name") || "";
+
+    async function loadMemory() {
+        try {
+            const response = await fetch(SHEET_API);
+            globalMemory = await response.json();
+            document.getElementById('mem-count').innerText = globalMemory.length;
+            document.getElementById('pudu-msg').innerText = userName ? `Halo ${userName}! Mau tanya apa hari ini? 🐾` : "Halo! Namamu siapa? (Ketik: Namaku [Nama])";
+            document.getElementById('ui-container').classList.remove('loading-ui');
+        } catch (e) { document.getElementById('pudu-msg').innerText = "Gagal konek satelit."; }
+    }
+
+    async function askInternet(query) {
+        try {
+            let clean = query.toLowerCase().replace(/siapa itu|apa itu|siapa sih|jelaskan|tentang/g, '').trim();
+            // Gunakan AllOrigins Proxy untuk menembus CORS browser
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://api.duckduckgo.com/?q=${clean}&format=json&no_html=1`)}`;
+            
+            const res = await fetch(proxyUrl);
+            const rawData = await res.json();
+            const data = JSON.parse(rawData.contents);
+            
+            return data.AbstractText || (data.RelatedTopics && data.RelatedTopics.length > 0 ? data.RelatedTopics[0].Text : null);
+        } catch (e) { return null; }
+    }
+
+    async function reportUnknown(text) {
+        fetch(SHEET_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: [{ keyword: text, response: "BELUM_ADA_JAWABAN" }] })
+        });
+    }
+
+    async function respond() {
+        const input = document.getElementById('user-input');
+        const bubble = document.getElementById('pudu-msg');
+        let text = input.value.trim();
+        if (!text) return;
+
+        bubble.innerText = "...";
+        let res = "";
+
+        if (text.toLowerCase().includes("namaku")) {
+            userName = text.split(/namaku/i)[1].trim();
+            localStorage.setItem("puffie_user_name", userName);
+            res = `Oke ${userName}, namamu sudah Puffie simpan di perangkat ini! ✨`;
+        }
+
+        if (!res) {
+            let bestMatch = "";
+            globalMemory.forEach(item => {
+                let key = item.keyword.toLowerCase();
+                if (text.toLowerCase().includes(key) && key.length > bestMatch.length && item.response !== "BELUM_ADA_JAWABAN") {
+                    bestMatch = key;
+                    res = item.response;
+                }
+            });
+        }
+
+        if (!res) {
+            bubble.innerText = "Bentar, aku cari di internet dulu... 🌐";
+            const info = await askInternet(text);
+            if (info) {
+                res = "Aku nemu ini: " + info;
+            } else {
+                res = `Aduh ${userName || 'Sobat'}, aku belum tau. Tapi sudah aku catat biar bosku jawab!`;
+                reportUnknown(text);
+            }
+        }
+
+        bubble.innerText = res;
+        input.value = "";
+    }
+
+    loadMemory();
+    document.getElementById('send-btn').onclick = respond;
+    document.getElementById('user-input').onkeypress = (e) => { if (e.key === 'Enter') respond(); };
+</script>
+</body>
+</html>
         <div id="ui-container" class="input-wrapper loading-ui">
             <input type="text" id="user-input" placeholder="Tanya apa saja..." autocomplete="off">
             <button id="send-btn">Kirim</button>
