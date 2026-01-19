@@ -3,37 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Puffie: Profesor Kecil 🐾</title>
+    <title>Puffie: Si Profesor Kecil 🐾</title>
     <link href="https://fonts.googleapis.com/css2?family=Itim&display=swap" rel="stylesheet">
     <style>
-        :root { 
-            --pudu-yellow: #FFD54F; 
-            --brown: #42210B; 
-            --soft-bg: #FFF9F0; 
-            --bubble-bg: #42210B;
+        :root { --pudu-yellow: #FFD54F; --brown: #42210B; --soft-bg: #FFF9F0; --bubble-bg: #42210B; }
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background-color: var(--soft-bg); font-family: 'Itim', cursive; }
+        .game-card { display: flex; flex-direction: column; height: 100%; width: 100%; max-width: 500px; margin: 0 auto; background: white; position: relative; }
+        .display-section { flex: 1; background: linear-gradient(#E3F2FD, #FFFFFF); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; min-height: 0; }
+        .stats-badge { position: absolute; top: 15px; background: white; padding: 4px 12px; border-radius: 15px; font-size: 11px; border: 2px solid var(--brown); z-index: 5; }
+        .pudu-bubble { background: var(--bubble-bg); color: white; padding: 12px 18px; border-radius: 20px; margin-bottom: 20px; max-width: 80%; text-align: center; font-size: 16px; position: relative; box-shadow: 0 4px 0 rgba(0,0,0,0.2); word-wrap: break-word; }
+        .pudu-bubble::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); border-top: 10px solid var(--bubble-bg); border-left: 10px solid transparent; border-right: 10px solid transparent; }
+        #pudu-svg { width: 120px; height: 120px; }
+        .bounce { animation: bounce 2s infinite; }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .chat-section { padding: 15px; background: white; border-top: 3px solid #F0F0F0; padding-bottom: env(safe-area-inset-bottom, 15px); }
+        .input-wrapper { display: flex; gap: 8px; }
+        input { flex: 1; padding: 12px 15px; border-radius: 15px; border: 2px solid #EEE; outline: none; font-family: 'Itim'; font-size: 16px; background: #F9F9F9; }
+        button { background: var(--pudu-yellow); border: 2px solid var(--brown); padding: 0 18px; border-radius: 15px; font-weight: bold; cursor: pointer; font-family: 'Itim'; box-shadow: 0 3px 0 var(--brown); }
+        .loading-ui { opacity: 0.4; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div class="game-card" id="main-app">
+    <div class="display-section">
+        <div class="stats-badge">🧠 Memori: <span id="mem-count">0</span></div>
+        <div id="pudu-msg" class="pudu-bubble">Menghubungkan satelit... ✨</div>
+        <svg id="pudu-svg" class="bounce" viewBox="0 0 100 100">
+            <ellipse cx="35" cy="30" rx="8" ry="20" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/><ellipse cx="65" cy="30" rx="8" ry="20" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/><circle cx="50" cy="65" r="30" fill="#FFD54F" stroke="#42210B" stroke-width="2.5"/><circle cx="40" cy="60" r="3.5" fill="#42210B"/><circle cx="60" cy="60" r="3.5" fill="#42210B"/><path d="M 45 72 Q 50 76 55 72" fill="none" stroke="#42210B" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+    </div>
+    <div class="chat-section">
+        <div id="ui-container" class="input-wrapper loading-ui">
+            <input type="text" id="user-input" placeholder="Tanya apa saja..." autocomplete="off">
+            <button id="send-btn">Kirim</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const SHEET_API = "https://sheetdb.io/api/v1/n5l2vbztj42bs"; 
+    let globalMemory = [];
+
+    async function loadMemory() {
+        try {
+            const response = await fetch(SHEET_API);
+            globalMemory = await response.json();
+            document.getElementById('mem-count').innerText = globalMemory.length;
+            document.getElementById('pudu-msg').innerText = "Halo! Puffie siap jawab pertanyaanmu! 🐾";
+            document.getElementById('ui-container').classList.remove('loading-ui');
+        } catch (e) { document.getElementById('pudu-msg').innerText = "Koneksi Sheets terputus."; }
+    }
+
+    async function askInternet(query) {
+        try {
+            // Kita coba ambil dari DuckDuckGo yang mengarah ke Wikipedia
+            const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`);
+            const data = await res.json();
+            return data.AbstractText || null;
+        } catch (e) { return null; }
+    }
+
+    async function reportUnknown(text) {
+        fetch(SHEET_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: [{ keyword: text, response: "BELUM_ADA_JAWABAN" }] })
+        });
+    }
+
+    async function respond() {
+        const input = document.getElementById('user-input');
+        const bubble = document.getElementById('pudu-msg');
+        let text = input.value.trim();
+        if (!text) return;
+
+        bubble.innerText = "...";
+        let res = "";
+
+        // 1. MATEMATIKA
+        const nums = text.match(/\d+/g);
+        if (nums && nums.length >= 2 && text.match(/[+x\:\-\*\/]|tambah|kurang|kali|bagi/)) {
+            let n1 = parseInt(nums[0]), n2 = parseInt(nums[1]), hasil;
+            if (text.includes("tambah") || text.includes("+")) hasil = n1 + n2;
+            else if (text.includes("kurang") || text.includes("-")) hasil = n1 - n2;
+            else if (text.includes("kali") || text.match(/[x\*×]/)) hasil = n1 * n2;
+            else if (text.includes("bagi") || text.match(/[\:\/]/)) hasil = (n1 / n2).toFixed(2);
+            if (hasil !== undefined) res = `Hasilnya ${hasil}. Gampang! 😎`;
         }
 
-        /* Mencegah scroll mental di HP */
-        html, body { 
-            height: 100%; 
-            margin: 0; 
-            padding: 0; 
-            overflow: hidden; 
-            background-color: var(--soft-bg);
-            font-family: 'Itim', cursive; 
+        // 2. CEK GOOGLE SHEETS (Hanya jika keyword cocok persis/mendekati)
+        if (!res) {
+            let bestMatch = "";
+            globalMemory.forEach(item => {
+                let key = item.keyword.toLowerCase();
+                // Pastikan kita tidak mengambil baris yang isinya "BELUM_ADA_JAWABAN"
+                if (text.toLowerCase().includes(key) && key.length > bestMatch.length && item.response !== "BELUM_ADA_JAWABAN") {
+                    bestMatch = key;
+                    res = item.response;
+                }
+            });
         }
 
-        .game-card { 
-            display: flex; 
-            flex-direction: column; 
-            height: 100%; /* Pakai 100% biar ikut tinggi viewport */
-            width: 100%;
-            max-width: 500px;
-            margin: 0 auto;
-            background: white;
-            position: relative;
+        // 3. CEK INTERNET (WIKIPEDIA)
+        if (!res) {
+            bubble.innerText = "Bentar ya, Puffie cari di buku pintar dulu... 🌐";
+            const info = await askInternet(text);
+            if (info) {
+                res = info;
+            } else {
+                res = "Duh, aku belum belajar itu. Tapi sudah aku catat biar nanti dijawab bosku! ✨";
+                reportUnknown(text);
+            }
         }
 
+        bubble.innerText = res;
+        input.value = "";
+    }
+
+    loadMemory();
+    document.getElementById('send-btn').onclick = respond;
+    document.getElementById('user-input').onkeypress = (e) => { if (e.key === 'Enter') respond(); };
+</script>
+</body>
+</html>
         /* Area Atas (Puffie) */
         .display-section { 
             flex: 1; 
